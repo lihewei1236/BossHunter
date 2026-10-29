@@ -270,6 +270,43 @@ class RecontactTests(unittest.TestCase):
         self.assertEqual((report["sent"], report["skipped_changed"]), (0, 1))
         self.assertEqual(sent, [])
 
+    def test_recontact_rechecks_window_after_throttle_wait_and_passes_checker_to_sender(self):
+        self.seed("window-first")
+        self.seed("window-second")
+        config = self.config(
+            ["window-first", "window-second"],
+            throttle={
+                "daily_limit": 30,
+                "interval_min": 0,
+                "interval_max": 0,
+                "send_windows": ["09:00-13:00"],
+            },
+        )
+        current_minute = [779]
+        calls = []
+
+        def send_once(job, _text, sender_config):
+            calls.append((job["id"], sender_config.get("_send_window_checker")))
+            return {"success": True}, None
+
+        def wait(_stop_event):
+            current_minute[0] = 780
+            return False
+
+        with (
+            patch.object(recontact, "should_take_day_off", return_value=False),
+            patch.object(recontact.SendWindowChecker, "_current_minutes", side_effect=lambda: current_minute[0]),
+            patch.object(recontact.RequestThrottle, "wait", side_effect=wait),
+            patch("bosshunter.executor.sender._send_greeting_once", side_effect=send_once),
+            patch("bosshunter.executor.sender.close_tab"),
+        ):
+            report = recontact.send_recontacts(config, db_path=self.path)
+
+        self.assertEqual(report["sent"], 1)
+        self.assertEqual(report["stop_reason"], "outside_window")
+        self.assertEqual([job_id for job_id, _ in calls], ["window-first"])
+        self.assertIsInstance(calls[0][1], recontact.SendWindowChecker)
+
     def test_recontact_counts_toward_shared_daily_quota(self):
         greeting = self.seed("quota")
         db = get_db(self.path)
