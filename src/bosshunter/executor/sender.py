@@ -1118,28 +1118,57 @@ def _send_greeting_once(job: dict, greeting: str, throttle_config: dict) -> tupl
     if window_closed():
         close_tab(target_id)
         return {"success": False, "error": "outside_window", "skip_backoff": True}, None
-    submit_result = _submit_chat_message_background(target_id, greeting)
-    if not submit_result.get("success"):
-        input_result = _fill_chat_input(target_id, greeting)
-        if not input_result.get("success"):
-            return input_result, target_id
-        if input_result.get("disabled"):
+    if existing_only:
+        # Recontact must keep the final HR check and Vue submission in one
+        # browser turn. Do not fall back to the legacy unchecked sender when
+        # this guarded operation cannot prove its result.
+        from bosshunter.executor import recontact
+
+        checked_state = recontact._submit_checked_message(target_id, greeting)
+        if checked_state == "hr_replied":
             return {
                 "success": False,
-                "error": "send_button_unavailable",
-                "history_detail": "招呼语已填入，但发送按钮不可用，未标记成功",
+                "error": "hr_replied",
+                "history_detail": "发送前的最终浏览器检查发现 HR 已回复，跳过再次投递",
                 "skip_backoff": True,
             }, target_id
-        if window_closed():
-            close_tab(target_id)
-            return {"success": False, "error": "outside_window", "skip_backoff": True}, None
-        if not click_at(target_id, ".btn-send:not(.disabled)"):
+        if checked_state == "unreadable":
             return {
                 "success": False,
-                "error": "send_button_click_failed",
-                "history_detail": "招呼语已填入，但发送按钮点击失败，未标记成功",
+                "error": "conversation_unverified",
+                "history_detail": "发送前无法确认当前会话消息方向，未发送",
                 "skip_backoff": True,
             }, target_id
+        if checked_state != "submitted":
+            return {
+                "success": False,
+                "error": "send_not_confirmed",
+                "history_detail": "最终浏览器检查的发送结果未确认，请人工检查后再决定是否重试",
+                "skip_backoff": True,
+            }, target_id
+    else:
+        submit_result = _submit_chat_message_background(target_id, greeting)
+        if not submit_result.get("success"):
+            input_result = _fill_chat_input(target_id, greeting)
+            if not input_result.get("success"):
+                return input_result, target_id
+            if input_result.get("disabled"):
+                return {
+                    "success": False,
+                    "error": "send_button_unavailable",
+                    "history_detail": "招呼语已填入，但发送按钮不可用，未标记成功",
+                    "skip_backoff": True,
+                }, target_id
+            if window_closed():
+                close_tab(target_id)
+                return {"success": False, "error": "outside_window", "skip_backoff": True}, None
+            if not click_at(target_id, ".btn-send:not(.disabled)"):
+                return {
+                    "success": False,
+                    "error": "send_button_click_failed",
+                    "history_detail": "招呼语已填入，但发送按钮点击失败，未标记成功",
+                    "skip_backoff": True,
+                }, target_id
 
     for _ in range(max(1, verification_attempts)):
         if _sleep_or_stop(0.5, stop_event):
