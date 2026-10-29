@@ -49,7 +49,7 @@ def _job(job_id: str, title: str = "Engineer") -> dict:
 
 
 class JobSelectionTests(unittest.TestCase):
-    def test_recontact_sender_uses_existing_chat_button_and_normal_send_verification(self):
+    def test_recontact_sender_uses_atomic_browser_guard_for_final_send(self):
         with patch("bosshunter.executor.sender.get_page_targets", return_value=[]), \
              patch("bosshunter.executor.sender.new_tab", return_value="job-target"), \
              patch("bosshunter.executor.sender.evaluate", return_value='{"success": true}'), \
@@ -59,7 +59,8 @@ class JobSelectionTests(unittest.TestCase):
              patch("bosshunter.executor.sender._wait_for_chat_page", return_value={"success": True, "target_id": "job-target"}), \
              patch("bosshunter.executor.sender._recontact_conversation_state", return_value="unreplied"), \
              patch("bosshunter.executor.sender._message_delivery_state", side_effect=["missing", "delivered", "delivered"]), \
-             patch("bosshunter.executor.sender._submit_chat_message_background", return_value={"success": True}), \
+             patch("bosshunter.executor.recontact._submit_checked_message", return_value="submitted") as checked_submit, \
+             patch("bosshunter.executor.sender._submit_chat_message_background") as unchecked_submit, \
              patch("bosshunter.executor.sender.close_tab"), \
              patch("bosshunter.executor.sender.time.sleep"):
             result, target_id = _send_greeting_once(
@@ -71,6 +72,8 @@ class JobSelectionTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertIsNone(target_id)
         new_chat.assert_not_called()
+        checked_submit.assert_called_once_with("job-target", "本次更新后的招呼语")
+        unchecked_submit.assert_not_called()
 
     def test_chat_button_script_prefers_real_anchor_over_visible_wrapper(self):
         script = CHAT_BUTTON_SCRIPT_FOR_TESTS
