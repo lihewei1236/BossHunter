@@ -231,6 +231,7 @@ def send_recontacts(config: dict, *, db_path: Path | None = None) -> dict:
         "_workbench_stop_event": stop_event,
         "_workbench_log": log,
         "_platform_access_guard": access,
+        "_send_window_checker": window,
         "_recontact_existing_only": True,
         "_recontact_chat_button_attempts": 8,
     })
@@ -255,6 +256,9 @@ def send_recontacts(config: dict, *, db_path: Path | None = None) -> dict:
                 break
             if send_throttle.has_marked_request and send_throttle.wait(stop_event):
                 report["stop_reason"] = "stopped"
+                break
+            if not window.is_active():
+                report["stop_reason"] = "outside_window"
                 break
             target_id = None
             with activity(job_id, "sending") if callable(activity) else nullcontext(True) as acquired:
